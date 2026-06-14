@@ -2,427 +2,89 @@
 title: How DotEnv Works
 slug: how-it-works
 order: 1
-tags: [architecture, overview, concepts]
+description: The big picture — store your secrets centrally, keep them encrypted, and pull or inject them wherever your code runs, through the web dashboard, the CLI, or the HTTP API.
+tags: [core-concepts, overview, architecture, encryption, cli, api]
 ---
 
 # How DotEnv Works
 
-DotEnv is a secure, centralized environment variable management system. This guide explains the architecture and flow of how your secrets move from storage to your application.
-
-## Architecture Overview
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Your Code     │────▶│   DotEnv API    │────▶│ Encrypted Store │
-├─────────────────┤     ├─────────────────┤     ├─────────────────┤
-│ • CLI           │     │ • Auth          │     │ • AES-256-GCM   │
-│ • SDKs          │     │ • Access Control│     │ • At-rest       │
-│ • GitHub Action │     │ • Audit Logs    │     │ • In-transit    │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-```
-
-## Core Components
-
-### 1. Secret Storage
-
-All secrets are encrypted using industry-standard AES-256-GCM encryption:
-
-```
-Original Secret: DATABASE_URL=postgresql://user:pass@host/db
-                          ↓
-Encrypted: ey0pK2x3M9Z8Q7...vN1mR4a3B6
-```
-
-**Encryption Process:**
-
-1. Generate unique 256-bit key per project
-2. Create 96-bit nonce for each secret
-3. Encrypt value with AES-256-GCM
-4. Store encrypted value + nonce + auth tag
-5. Key stored separately with additional encryption
-
-### 2. Authentication & Authorization
-
-```
-Request Flow:
-Client ──(API Key)──▶ Auth Service ──(Token)──▶ API ──(Permissions)──▶ Secrets
-```
-
-**Authentication Layers:**
-
-- API Keys: Project or organization scoped
-- OAuth 2.0: For web dashboard
-- Service Accounts: For CI/CD
-- SSO/SAML: Enterprise authentication
-
-### 3. Access Control
-
-Fine-grained permission system:
-
-```
-User → Organization → Project → Environment → Secret
-         ↓              ↓           ↓           ↓
-       Owner         Admin      Developer    Read/Write
-```
-
-## Data Flow
-
-### Writing Secrets
-
-```mermaid
-sequenceDiagram
-    participant CLI
-    participant API
-    participant Encryption
-    participant Database
-
-    CLI->>API: POST /secrets (with value)
-    API->>API: Validate permissions
-    API->>Encryption: Encrypt value
-    Encryption->>Database: Store encrypted
-    Database-->>API: Confirmation
-    API-->>CLI: Success
-```
-
-**Steps:**
-
-1. Client sends secret with authentication
-2. API validates user permissions
-3. Secret encrypted with project key
-4. Encrypted value stored in database
-5. Audit log entry created
-6. Confirmation returned to client
-
-### Reading Secrets
-
-```mermaid
-sequenceDiagram
-    participant App
-    participant SDK
-    participant API
-    participant Cache
-    participant Database
-
-    App->>SDK: Load secrets
-    SDK->>API: GET /secrets
-    API->>Cache: Check cache
-    Cache-->>API: Miss
-    API->>Database: Fetch encrypted
-    Database-->>API: Return encrypted
-    API->>API: Decrypt
-    API->>Cache: Store decrypted
-    API-->>SDK: Return secrets
-    SDK-->>App: Set env vars
-```
-
-**Steps:**
-
-1. Application requests secrets via SDK
-2. SDK authenticates with API
-3. API checks permissions
-4. Encrypted secrets retrieved
-5. Decryption happens server-side
-6. Secrets returned over TLS
-7. SDK populates environment
-
-## Security Layers
-
-### 1. Encryption at Rest
-
-```
-Database Storage:
-┌────────────────────────────────────┐
-│ secrets table                      │
-├────────────────────────────────────┤
-│ id: uuid                           │
-│ key: "DATABASE_URL"                │
-│ value: <encrypted_blob>            │
-│ nonce: <random_96_bit>             │
-│ tag: <auth_tag>                    │
-│ version: 1                         │
-│ created_at: timestamp              │
-└────────────────────────────────────┘
-```
-
-### 2. Encryption in Transit
-
-All API communication uses TLS 1.3:
-
-- Certificate pinning available
-- Perfect forward secrecy
-- No deprecated ciphers
-
-### 3. Key Management
-
-```
-Master Key (AWS KMS)
-    └── Organization Key
-            └── Project Key
-                    └── Secret Encryption
-```
-
-**Key Rotation:**
-
-- Automatic rotation available
-- Zero-downtime rotation
-- Maintains version history
-
-## Client Operations
-
-### CLI Workflow
-
-```bash
-# 1. Authentication
-$ dotenv login
-Browser opened → OAuth flow → Token stored
-
-# 2. Project Selection
-$ dotenv use my-app
-Context set to project: my-app
-
-# 3. Secret Management
-$ dotenv secrets set API_KEY=value
-Encrypted and stored
-
-# 4. Secret Retrieval
-$ dotenv secrets pull > .env
-Decrypted and written
-```
-
-### SDK Workflow
-
-```javascript
-// 1. Initialize
-const dotenv = new DotEnv({
-    apiKey: "your-api-key",
-    project: "my-app",
-});
-
-// 2. Load secrets
-await dotenv.load();
-// Makes API call, decrypts, sets process.env
-
-// 3. Access secrets
-console.log(process.env.DATABASE_URL);
-// Already decrypted and available
-```
-
-### GitHub Action Workflow
-
-```yaml
-- uses: dotenv/actions@v1
-  with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-# Action performs:
-# 1. Authenticate with API
-# 2. Fetch encrypted secrets
-# 3. Decrypt server-side
-# 4. Inject into runner environment
-```
-
-## Caching Strategy
-
-### Server-Side Cache
-
-```
-API Server
-├── L1 Cache (Memory) - 5 min TTL
-├── L2 Cache (Redis) - 60 min TTL
-└── Database (Source of truth)
-```
-
-### Client-Side Cache
-
-```javascript
-// SDKs implement smart caching
-const cache = new Map();
-const TTL = 5 * 60 * 1000; // 5 minutes
-
-async function getSecrets() {
-    if (cache.has("secrets") && cache.get("expires") > Date.now()) {
-        return cache.get("secrets");
-    }
-
-    const secrets = await fetchFromAPI();
-    cache.set("secrets", secrets);
-    cache.set("expires", Date.now() + TTL);
-    return secrets;
-}
-```
-
-## Audit Trail
-
-Every operation is logged:
-
-```json
-{
-    "id": "evt_2x4y6z8a",
-    "action": "secret.updated",
-    "actor": {
-        "id": "usr_1a2b3c4d",
-        "email": "alice@example.com",
-        "ip": "203.0.113.45"
-    },
-    "resource": {
-        "type": "secret",
-        "id": "sec_5e6f7g8h",
-        "key": "DATABASE_URL",
-        "project": "my-app",
-        "environment": "production"
-    },
-    "timestamp": "2024-01-15T10:30:00Z",
-    "changes": {
-        "before": "<encrypted>",
-        "after": "<encrypted>"
-    }
-}
-```
-
-## Performance Optimization
-
-### 1. Parallel Loading
-
-```javascript
-// Load multiple projects concurrently
-const [api, web, mobile] = await Promise.all([
-    dotenv.load({ project: "api" }),
-    dotenv.load({ project: "web" }),
-    dotenv.load({ project: "mobile" }),
-]);
-```
-
-### 2. Selective Loading
-
-```javascript
-// Load only specific keys
-await dotenv.load({
-    keys: ["DATABASE_URL", "REDIS_URL", "API_KEY"],
-});
-```
-
-### 3. Lazy Loading
-
-```javascript
-// Load on first access
-const secrets = new Proxy(
-    {},
-    {
-        get: async (target, prop) => {
-            if (!target[prop]) {
-                await dotenv.loadKey(prop);
-            }
-            return target[prop];
-        },
-    },
-);
-```
-
-## Disaster Recovery
-
-### Backup Strategy
-
-```
-Primary Region (us-east-1)
-    ├── Synchronous replication → Secondary (us-west-2)
-    └── Async backup → Cold storage (S3)
-```
-
-### Recovery Procedures
-
-1. **Automatic Failover**: < 30 seconds
-2. **Manual Failover**: < 5 minutes
-3. **Full Restoration**: < 1 hour
-
-## Integration Points
-
-### 1. Development Tools
-
-- VS Code Extension
-- IntelliJ Plugin
-- Terminal Integration
-
-### 2. CI/CD Platforms
-
-- GitHub Actions
-- GitLab CI
-- Jenkins
-- CircleCI
-- Travis CI
-
-### 3. Cloud Providers
-
-- AWS Secrets Manager sync
-- Azure Key Vault sync
-- Google Secret Manager sync
-- Kubernetes Secrets
-
-### 4. Monitoring
-
-- Datadog integration
-- New Relic integration
-- Custom webhooks
-
-## Best Practices
-
-### 1. Minimize Secret Exposure
-
-```javascript
-// ❌ Bad: Logging secrets
-console.log(process.env);
-
-// ✅ Good: Selective access
-const dbUrl = process.env.DATABASE_URL;
-// Use dbUrl without logging
-```
-
-### 2. Use Least Privilege
-
-```bash
-# ❌ Bad: Broad access
-dotenv api-keys create --scopes "*"
-
-# ✅ Good: Specific access
-dotenv api-keys create \
-  --scopes "secrets:read" \
-  --projects "web-app" \
-  --environments "production"
-```
-
-### 3. Regular Rotation
-
-```bash
-# Set up automatic rotation
-dotenv secrets rotate-schedule \
-  --key API_KEY \
-  --interval 90d \
-  --notify ops@example.com
-```
-
-## Common Questions
-
-### Q: Where are secrets stored?
-
-A: Encrypted in highly available databases across multiple regions with automatic backups.
-
-### Q: Can DotEnv employees see my secrets?
-
-A: No. Secrets are encrypted with keys that only you control. We cannot decrypt your secrets.
-
-### Q: What happens if DotEnv is down?
-
-A: SDKs include fallback mechanisms and caching. Your applications continue running with cached values.
-
-### Q: How fast is secret retrieval?
-
-A: Average latency:
-
-- Cached: < 1ms
-- API call: < 50ms globally
-- Cold start: < 200ms
-
-## Next Steps
-
-- [Organizations & Projects](./organizations-projects) - Structure your secrets
-- [Environments](./environments-concept) - Manage multiple configurations
-- [Security Model](./security-model) - Deep dive into security
-- [API Reference](/documentation/v1/api/overview) - Direct API usage
+DotEnv is a place to store the configuration your applications need to run — database URLs, API
+keys, tokens, feature flags — **encrypted, organized, and shared** across your team and your
+deployments. Instead of passing `.env` files around in chat or copying them between machines, you
+keep one source of truth in DotEnv and pull the right values where you need them.
+
+This page is the big picture. The rest of Core Concepts drills into each part.
+
+## The core idea
+
+1. **Store secrets centrally.** You organize secrets into a hierarchy — organization, project,
+   target, environment — so every value has an obvious home. See
+   [The DotEnv Hierarchy](/documentation/core-concepts/hierarchy).
+2. **Everything is encrypted.** Secret values are encrypted with AES-256-GCM before they are
+   stored. Depending on the key model you choose, DotEnv may never see your plaintext at all. See
+   [Security Model](/documentation/core-concepts/security-model).
+3. **Pull or inject where needed.** When an application, a CI job, or a developer needs the
+   secrets, they retrieve them on demand. Values from the different levels are merged together —
+   most-specific-wins — into the final set the app sees. See
+   [Secret Inheritance](/documentation/core-concepts/secret-inheritance).
+
+The result: one authoritative, encrypted store, and a consistent set of values everywhere your
+code runs.
+
+## Three ways to use DotEnv
+
+You interact with the same secrets through whichever interface fits the task.
+
+### Web dashboard
+
+The browser app is where you set things up and do day-to-day editing: create the hierarchy,
+invite people, manage roles, choose your encryption model, and edit secrets in the Multi-Level
+Secret Editor (which shows you exactly how the levels merge). It is the most visual way to work
+and the best place to administer your organization.
+
+### CLI
+
+The command-line tool is built for developers and automation. You authenticate once, then
+`pull` secrets down into a local `.env` (or JSON, YAML, shell, or Dockerfile output) and `push`
+files back up. It applies the same hierarchy merge as the dashboard, can resolve `${VAR}`
+references between secrets, and handles client-side encryption when a project uses a passphrase
+you hold. This is what you wire into local development and CI/CD.
+
+### HTTP API
+
+Everything the dashboard and CLI do sits on top of a versioned HTTP API
+(`https://api.dotenv.cloud/api/v1`). You can call it directly from your own tooling using an
+organization API token. The API is the integration surface for anything not covered by the
+dashboard or CLI.
+
+> **A note on SDKs:** language SDKs are not yet published. Until they are, integrate through the
+> CLI or the HTTP API.
+
+## Where the work happens
+
+A key design choice runs through DotEnv: **the server stores encrypted blobs, and the client does
+the sensitive interpretation.**
+
+- The server keeps each level's secrets as an encrypted blob. It does not parse your `KEY=value`
+  content, and in the client-managed key model it cannot read the plaintext at all.
+- **Merging** levels into a final set and **resolving** `${VAR}` interpolation happen in the
+  client — the CLI (or the dashboard in your browser) — at the moment you pull, not on the server.
+
+This keeps your values private while still letting DotEnv organize, version, and share them.
+
+## Putting it together
+
+A typical flow looks like this:
+
+1. In the dashboard, create a **project**, add a **target** (e.g. `backend`), and add an
+   **environment** (e.g. `production`).
+2. Choose an encryption model — let DotEnv manage the key, or hold a passphrase yourself for
+   zero-knowledge storage.
+3. Add secrets at the level where they belong: shared defaults on the project, context-specific
+   values on the target, environment-specific values on the environment.
+4. Create a scoped API token for your CI pipeline.
+5. In CI, run the CLI to `pull` the merged, decrypted secrets into a `.env` for the build or
+   deploy.
+
+From here, follow [The DotEnv Hierarchy](/documentation/core-concepts/hierarchy) to learn how the
+structure is organized.

@@ -1,228 +1,110 @@
 ---
-title: Quick Start Guide
+title: Quick Start
 slug: quick-start
-order: 1
-tags: [quickstart, getting-started, basics]
+order: 3
+description: Go from zero to a populated .env file in about five minutes — sign up, build your hierarchy, add a secret, then pull it with the CLI.
+tags: [getting-started, quick-start, tutorial, cli, pull, secrets]
 ---
 
-# Quick Start Guide
+# Quick Start
 
-Get up and running with DotEnv in less than 5 minutes. This guide covers the essential steps to start managing your environment variables securely.
+This is the fastest path through DotEnv. In about five minutes you'll create an account, build a
+project, add a secret in the dashboard, and pull it onto your machine as a `.env` file.
 
-## Prerequisites
+If you haven't installed anything yet, the [Installation](/documentation/getting-started/installation)
+guide covers the account and the CLI in detail. Each step below links out if you want more depth.
 
-Before you begin, ensure you have:
+## 1. Sign up
 
-- A DotEnv account (sign up at [dotenv.cloud](https://dotenv.cloud))
-- Node.js 16+ or your preferred runtime environment
-- Basic familiarity with environment variables
+Open [dotenv.cloud](https://dotenv.cloud), **register**, and **verify your email**. When you sign
+in you land on your dashboard with a first organization already created for you.
 
-## Step 1: Install the CLI
+## 2. Create a project, target, and environment
 
-The DotEnv CLI provides the easiest way to manage your secrets from the command line.
+DotEnv organizes secrets into a nested hierarchy:
+**Organization → Project → Target → Environment → Secret**. You only need one of each to start.
 
-### macOS/Linux
+1. Go to **Projects** and click **Create project**. Give it a name (for example `myapp`); the
+   **slug** is derived from it. You'll use that slug from the CLI.
+2. Open the project and **Create target** — a deployment context such as `production`.
+3. Open the target and **Create environment** — for example `api`. This is where secrets actually
+   live.
 
-```bash
-curl -sSL https://dotenv.cloud/install.sh | sh
+You now have the path `myapp/production/api`. See
+[Create your first project](/documentation/getting-started/first-project) for the full walkthrough.
+
+## 3. Add a secret in the dashboard
+
+Open your project's secret editor, select **`myapp → production → api`**, and add a variable:
+
+```
+DATABASE_URL = postgres://localhost:5432/myapp
 ```
 
-### Windows
+Save it. Values are encrypted at rest with AES-256-GCM. For more on adding and overriding
+secrets across levels, see [Managing Secrets](/documentation/web-app/managing-secrets).
+
+## 4. Install the CLI
+
+If you haven't already:
+
+```bash
+# macOS / Linux
+curl -sSL https://dotenv.cloud/install.sh | bash
+```
 
 ```powershell
-iwr -useb https://dotenv.cloud/install.ps1 | iex
+# Windows (PowerShell)
+irm https://dotenv.cloud/install.ps1 | iex
 ```
 
-### Alternative: Using npm
+Verify it:
 
 ```bash
-npm install -g @dotenv/cli
+dotenv version
 ```
 
-## Step 2: Authenticate
+Other install methods are listed in
+[Installation](/documentation/getting-started/installation).
 
-Log in to your DotEnv account:
+## 5. Log in
+
+Authenticate the CLI with your account using browser-based login:
 
 ```bash
 dotenv login
 ```
 
-This will open your browser for authentication. Once complete, your CLI will be authenticated.
+This opens your browser to complete sign-in. (For CI and automation you'd use a read-only API
+key instead — see [Team setup](/documentation/getting-started/team-setup) and
+[CLI Authentication](/documentation/cli/authentication).)
 
-## Step 3: Create Your First Project
+## 6. Pull your secrets into `.env`
 
-Projects organize your secrets by application or service:
-
-```bash
-dotenv projects create my-app
-```
-
-## Step 4: Add Secrets
-
-Add your first secret to the project:
+Pull the environment you created and write it to a local `.env` file:
 
 ```bash
-dotenv secrets set DATABASE_URL="postgresql://user:pass@localhost/mydb" --project my-app
+dotenv pull myapp/production/api --output .env
 ```
 
-You can also add multiple secrets at once:
+That's it. Your `.env` now contains:
 
-```bash
-dotenv secrets set \
-  API_KEY="sk-1234567890" \
-  REDIS_URL="redis://localhost:6379" \
-  --project my-app
+```
+DATABASE_URL=postgres://localhost:5432/myapp
 ```
 
-## Step 5: Pull Secrets to Your Application
+Load it with whatever your framework already uses to read `.env` files. The CLI's job is to put
+the right secrets on disk securely; how your app reads them stays the same.
 
-### Using the CLI
+> **Tip:** the path merges every level it touches. `myapp/production/api` combines
+> project-level, target-level, and environment-level secrets, with the most specific level
+> winning. See [Environments & cascading](/documentation/getting-started/environments).
 
-Generate a .env file for local development:
+## Next steps
 
-```bash
-dotenv secrets pull --project my-app --environment development > .env
-```
-
-### Using SDKs
-
-**Node.js/JavaScript:**
-
-```javascript
-import { DotEnv } from "@dotenv/sdk";
-
-const dotenv = new DotEnv({
-    apiKey: process.env.DOTENV_API_KEY,
-    project: "my-app",
-    environment: "development",
-});
-
-await dotenv.load();
-// Your secrets are now available in process.env
-```
-
-**Python:**
-
-```python
-from dotenv_sdk import DotEnv
-
-dotenv = DotEnv(
-    api_key=os.getenv('DOTENV_API_KEY'),
-    project='my-app',
-    environment='development'
-)
-
-dotenv.load()
-# Your secrets are now available in os.environ
-```
-
-## Step 6: Deploy with Docker
-
-For production deployments, fetch secrets at container startup:
-
-```dockerfile
-FROM node:18-alpine
-
-# Install DotEnv CLI
-RUN curl -sSL https://dotenv.cloud/install.sh | sh
-
-# Copy application files
-WORKDIR /app
-COPY . .
-
-# Fetch secrets and start application
-CMD dotenv secrets pull --project my-app --environment production > .env && \
-    node server.js
-```
-
-## What's Next?
-
-- **[Set up environments](./environments)** - Learn about development, staging, and production environments
-- **[Team collaboration](./team-setup)** - Invite team members and manage permissions
-- **[Best practices](./best-practices)** - Security recommendations and usage patterns
-- **[CLI reference](/documentation/v1/cli/commands)** - Explore all available CLI commands
-
-## Example: Complete Node.js Setup
-
-Here's a complete example setting up a Node.js application:
-
-```javascript
-// install.js - First time setup
-const { execSync } = require("child_process");
-
-// Install DotEnv SDK
-execSync("npm install @dotenv/sdk");
-
-// Create project
-execSync("dotenv projects create my-node-app");
-
-// Add common secrets
-const secrets = {
-    DATABASE_URL: "postgresql://localhost/myapp",
-    REDIS_URL: "redis://localhost:6379",
-    JWT_SECRET: "your-secret-key",
-    PORT: "3000",
-};
-
-for (const [key, value] of Object.entries(secrets)) {
-    execSync(`dotenv secrets set ${key}="${value}" --project my-node-app`);
-}
-
-console.log("✅ DotEnv setup complete!");
-```
-
-```javascript
-// app.js - Your application
-import { DotEnv } from "@dotenv/sdk";
-import express from "express";
-
-// Load secrets
-const dotenv = new DotEnv({
-    apiKey: process.env.DOTENV_API_KEY,
-    project: "my-node-app",
-    environment: process.env.NODE_ENV || "development",
-});
-
-await dotenv.load();
-
-// Your app now has access to all secrets
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
-```
-
-## Troubleshooting
-
-### Authentication Issues
-
-If you encounter authentication problems:
-
-```bash
-dotenv logout
-dotenv login --force
-```
-
-### Missing Secrets
-
-Verify your secrets are set correctly:
-
-```bash
-dotenv secrets list --project my-app
-```
-
-### Permission Denied
-
-Ensure you have the correct permissions:
-
-```bash
-dotenv projects members --project my-app
-```
-
-## Need Help?
-
-- 📧 Email: support@dotenv.cloud
-- 💬 Discord: [Join our community](https://discord.gg/dotenv)
-- 📚 Full documentation: [docs.dotenv.cloud](https://docs.dotenv.cloud)
+- [Create your first project](/documentation/getting-started/first-project) — the hierarchy in
+  full.
+- [Environments & cascading](/documentation/getting-started/environments) — how secrets merge
+  across levels.
+- [Pulling and pushing](/documentation/cli/pulling-and-pushing) — formats, interpolation, and
+  more CLI options.

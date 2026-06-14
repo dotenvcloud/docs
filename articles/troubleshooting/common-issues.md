@@ -1,339 +1,150 @@
 ---
 title: Common Issues
 slug: common-issues
-order: 20
-tags: [troubleshooting, issues, solutions]
+order: 1
+description: Symptom-cause-fix guide for the most frequent DotEnv problems — authentication failures, empty pulls, .env not loading, client-key mismatches, TLS errors, and permission denials.
+tags: [troubleshooting, cli, authentication, encryption, permissions, tls]
 ---
 
 # Common Issues
 
-Solutions to frequently encountered problems with DotEnv.
+This page lists the problems people hit most often, organized as **symptom → cause → fix**. Most
+involve the CLI; some apply to any client (SDKs, API). For the precise error payloads behind these,
+see the [Error Reference](/documentation/troubleshooting/error-reference).
 
-## Installation Issues
+> Tip: run any CLI command with `--debug` for extra diagnostic output, and run `dotenv status` to
+> see which account, organization, and API URL are currently in effect.
 
-### CLI Installation Fails on macOS
+## Authentication fails
 
-**Problem**: Installation script fails with permission errors
+**Symptom** — Commands report `authentication failed`, `your session has expired`, or
+`no accounts configured`.
 
-**Solution**:
-```bash
-# Use sudo if installing to system directories
-curl -fsSL https://dotenv.cloud/install.sh | sudo sh
+**Cause** — No credentials are configured, the supplied API key is wrong, or an OAuth session has
+expired.
 
-# Or install to user directory
-curl -fsSL https://dotenv.cloud/install.sh | sh -s -- --install-dir=$HOME/.local/bin
-```
+**Fix**
 
-### CLI Installation Fails on Windows
+- Check what's configured with `dotenv status`.
+- If nothing is configured, authenticate with one of:
+  - `dotenv login` — interactive OAuth login (lets you list/switch organizations).
+  - `dotenv login --api-key <key>` — log in with an organization API key.
+  - `export DOTENV_API_KEY=<key>` — set the key in the environment (best for CI).
+- If `dotenv status` shows an **expired** OAuth token, refresh it with `dotenv account refresh`.
+  If the refresh token has also expired, run `dotenv login` again. API keys never need refreshing —
+  they keep working until deleted or rotated.
 
-**Problem**: PowerShell execution policy blocks installation
+See [Member Management](/documentation/administration/member-management) for switching
+organizations.
 
-**Solution**:
-```powershell
-# Temporarily bypass execution policy
-powershell -ExecutionPolicy Bypass -c "iwr https://dotenv.cloud/install.ps1 -useb | iex"
+## A pull returns nothing (empty result)
 
-# Or permanently allow scripts
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
+**Symptom** — `dotenv pull` succeeds but returns no secrets, or far fewer than expected.
 
-### CLI Not Found After Installation
+**Cause** — Usually the wrong **path** (project/target/environment) or a **token scoped** so
+narrowly it can't see the level you asked for. An empty level legitimately returns nothing.
 
-**Problem**: `dotenv: command not found`
+**Fix**
 
-**Solution**:
-```bash
-# Add to PATH in ~/.bashrc or ~/.zshrc
-export PATH="$HOME/.local/bin:$PATH"
+- Verify the path components exist and are spelled correctly:
 
-# Reload shell configuration
-source ~/.bashrc  # or ~/.zshrc
-```
+  ```bash
+  dotenv list projects
+  dotenv list targets <project>
+  dotenv list environments <project>/<target>
+  ```
 
-## Authentication Issues
+- Confirm you're pointed at the right organization with `dotenv status`; if not, select it
+  (`dotenv org list`, then `dotenv org use <organization>`).
+- If you authenticate with an API key whose permissions are **scoped** to specific
+  projects/targets/environments, a path outside that scope returns nothing (or a permission error).
+  Check the key's scopes — see
+  [Roles & Permissions](/documentation/administration/roles-and-permissions).
 
-### Cannot Login with CLI
+## `.env` file isn't loading
 
-**Problem**: Login fails even with correct credentials
+**Symptom** — Your application can't see the variables you pulled.
 
-**Possible Causes**:
-1. MFA is enabled but code not provided
-2. Account locked due to failed attempts
-3. Network blocking API access
+**Cause** — The pull output never reached a file your app reads, or it went to the wrong location.
 
-**Solutions**:
-```bash
-# Login with MFA
-dotenv auth:login --mfa
+**Fix**
 
-# Check network connectivity
-curl -I https://api.dotenv.cloud/health
+- `dotenv pull` writes to stdout unless you direct it. Send it to a file, or use `--output`:
 
-# Use API token instead
-dotenv auth:login --token YOUR_API_TOKEN
-```
+  ```bash
+  dotenv pull <project>/<target>/<environment> --format env > .env
+  # or
+  dotenv pull <project>/<target>/<environment> --output .env
+  ```
 
-### API Token Not Working
+- Make sure the file is where your framework/runtime expects it (typically the project root) and
+  that your app actually loads a `.env` file.
+- If `--output` targets an existing file, the CLI offers to back it up to `<file>.backup` first.
+  Declining cancels the write — so the file you expected may be unchanged.
 
-**Problem**: "Invalid API token" error
+There is **no** `dotenv run` command; the CLI writes/export the values, and your app or shell loads
+them.
 
-**Solutions**:
-1. Verify token hasn't expired
-2. Check token has required permissions
-3. Ensure using correct organization
+## Client-managed key mismatch
 
-```bash
-# Verify token
-dotenv auth:check
+**Symptom** — Pull fails to decrypt, or push is refused with a message about the encryption key not
+matching the project ("key proof mismatch").
 
-# List token permissions
-dotenv auth:tokens:list
-```
+**Cause** — The project uses **client-managed encryption** and the key you supplied is wrong,
+mistyped, or simply not the key the project was established with. On push, the CLI verifies your key
+against the project's stored proof and refuses rather than orphaning the level with content nobody
+can decrypt.
 
-## Sync Issues
+**Fix**
 
-### Secrets Not Syncing
+- Supply the project's **established** key. The CLI resolves a client key in this order (safest
+  first):
+  1. `--client-key <file>` — path to a file containing the key (recommended; no warning).
+  2. `--client-key <value>` — the key value itself (warned: leaks via shell history / process list).
+  3. `DOTENV_CLIENT_KEY=<value>` — environment variable holding the key value (warned).
+  4. Interactive prompt — when none of the above is provided.
+- A `--client-key` value that looks like a path but doesn't exist is treated as an **error**, not a
+  silent key, so typos are caught instead of producing a wrong-key mismatch.
+- If you genuinely lost the key, you cannot recover the encrypted content — the server never has it.
+  Re-establish the project's key from the web dashboard.
 
-**Problem**: Local changes not appearing in remote
+See [Client-side encryption](/documentation/cli/client-side-encryption) for how keys are resolved.
 
-**Solutions**:
-```bash
-# Force sync
-dotenv sync --force
+## TLS / certificate errors
 
-# Check sync status
-dotenv status
+**Symptom** — Requests fail with a TLS or certificate verification error.
 
-# Verify project connection
-dotenv projects:info
-```
+**Cause** — The endpoint's certificate can't be verified — commonly when talking to a local
+development server with a self-signed certificate.
 
-### Merge Conflicts
+**Fix**
 
-**Problem**: "Conflict detected" during sync
+- Against the production API the CLI **requires** valid TLS; fix the certificate or network path
+  rather than disabling verification.
+- For **local development only**, `DOTENV_TLS_SKIP_VERIFY=1` skips verification — but it is honored
+  **only** when the API URL points at a local host (`localhost`, `127.0.0.1`, `::1`, or a `.test`,
+  `.local`, or `.localhost` domain). It is ignored against real hosts like `api.dotenv.cloud`, so a
+  stray value can't silently expose your tokens and secrets to a man-in-the-middle.
 
-**Solution**:
-```bash
-# Pull remote changes first
-dotenv pull
+  ```bash
+  export DOTENV_API_URL="https://dotenv.test"
+  export DOTENV_TLS_SKIP_VERIFY=1
+  dotenv list projects
+  ```
 
-# Resolve conflicts manually in .env file
+## Permission denied
 
-# Push resolved changes
-dotenv push --force
-```
+**Symptom** — `access denied to <resource>`, or an API call returns `403`.
 
-## Encryption Issues
+**Cause** — Your account's **role**, or your API key's **scopes**, don't include the permission the
+action requires.
 
-### Cannot Decrypt Secrets
+**Fix**
 
-**Problem**: "Decryption failed" errors
-
-**Common Causes**:
-1. Using wrong encryption key
-2. Key format is incorrect
-3. Secret was encrypted with different key
-
-**Solutions**:
-```bash
-# Verify key format (32 bytes, base64)
-echo -n "your-key" | base64 -d | wc -c  # Should output 32
-
-# Re-encrypt with correct key
-dotenv secrets:rotate-keys
-
-# Use server-managed encryption
-dotenv projects:update --encryption-mode server
-```
-
-### Client-Side Encryption Not Working
-
-**Problem**: Secrets visible in plaintext on server
-
-**Solution**:
-```bash
-# Enable client-side encryption
-dotenv projects:update --encryption-mode client
-
-# Provide encryption key
-export DOTENV_ENCRYPTION_KEY="your-base64-key"
-
-# Re-encrypt existing secrets
-dotenv secrets:rotate-keys
-```
-
-## Performance Issues
-
-### Slow API Responses
-
-**Problem**: Commands take long time to complete
-
-**Solutions**:
-1. Check network latency to API
-2. Use pagination for large datasets
-3. Enable caching
-
-```bash
-# Test API latency
-time curl -I https://api.dotenv.cloud/health
-
-# Use pagination
-dotenv secrets:list --limit 50 --page 1
-
-# Enable local caching
-dotenv config:set cache.enabled true
-```
-
-### High Memory Usage
-
-**Problem**: CLI using excessive memory
-
-**Solutions**:
-```bash
-# Limit concurrent operations
-dotenv config:set concurrency 1
-
-# Clear local cache
-dotenv cache:clear
-
-# Use streaming for large files
-dotenv export --stream > .env
-```
-
-## Integration Issues
-
-### Docker Container Can't Access Secrets
-
-**Problem**: Environment variables not available in container
-
-**Solution**:
-```dockerfile
-# Option 1: Build-time secrets
-ARG DOTENV_TOKEN
-RUN --mount=type=secret,id=dotenv_token \
-    dotenv export --token $(cat /run/secrets/dotenv_token) > .env
-
-# Option 2: Runtime injection
-FROM dotenv/cli as secrets
-ARG DOTENV_TOKEN
-RUN dotenv export --token $DOTENV_TOKEN > /secrets/.env
-
-FROM your-app
-COPY --from=secrets /secrets/.env .env
-```
-
-### CI/CD Pipeline Failures
-
-**Problem**: Secrets not available in CI environment
-
-**Solutions**:
-
-**GitHub Actions**:
-```yaml
-- name: Load secrets
-  run: |
-    curl -fsSL https://dotenv.cloud/install.sh | sh
-    dotenv export --token ${{ secrets.DOTENV_TOKEN }} > .env
-```
-
-**GitLab CI**:
-```yaml
-before_script:
-  - curl -fsSL https://dotenv.cloud/install.sh | sh
-  - dotenv export --token $DOTENV_TOKEN > .env
-```
-
-### SDK Initialization Errors
-
-**Problem**: SDK throws initialization errors
-
-**JavaScript/TypeScript**:
-```javascript
-// Ensure environment variables are loaded
-import { DotEnv } from '@dotenv/sdk';
-
-const client = new DotEnv({
-  apiKey: process.env.DOTENV_API_KEY,
-  // Add retry logic
-  retry: {
-    maxRetries: 3,
-    retryDelay: 1000,
-  },
-});
-```
-
-**PHP**:
-```php
-use DotEnv\SDK\Client;
-
-// Check for required extensions
-if (!extension_loaded('curl')) {
-    throw new Exception('CURL extension required');
-}
-
-$client = new Client([
-    'apiKey' => $_ENV['DOTENV_API_KEY'],
-    'timeout' => 30,
-]);
-```
-
-## Organization Issues
-
-### Cannot Access Organization
-
-**Problem**: "Forbidden" errors when accessing organization
-
-**Solutions**:
-1. Verify organization membership
-2. Check if organization is suspended
-3. Ensure using correct API token
-
-```bash
-# List accessible organizations
-dotenv orgs:list
-
-# Switch organization context
-dotenv config:set organization YOUR_ORG_ID
-```
-
-### Hitting Usage Limits
-
-**Problem**: "Quota exceeded" errors
-
-**Solutions**:
-```bash
-# Check current usage
-dotenv orgs:usage
-
-# Clean up unused resources
-dotenv projects:list --unused
-dotenv secrets:cleanup --dry-run
-```
-
-## Debug Mode
-
-Enable debug mode for detailed error information:
-
-```bash
-# CLI debug mode
-export DOTENV_DEBUG=true
-dotenv [command]
-
-# Or inline
-dotenv --debug [command]
-```
-
-## Getting Help
-
-If issues persist:
-
-1. Check service status: https://status.dotenv.cloud
-2. Search documentation: https://docs.dotenv.cloud
-3. Contact support: support@dotenv.cloud
-
-Include in support requests:
-- Error messages and codes
-- CLI version: `dotenv --version`
-- Operating system and version
-- Steps to reproduce issue
-- Debug output if available
+- Confirm you're operating in the right organization (`dotenv status`).
+- Check that your role grants the action. Read-only roles (e.g. **Auditor**) and read-only API keys
+  can't write, rotate keys, or restore versions — see
+  [Roles & Permissions](/documentation/administration/roles-and-permissions).
+- For automation, mint or adjust an API key with the required permission scope.
+- If you should have access but don't, ask an **Owner** or **Administrator** of the organization to
+  adjust your role.

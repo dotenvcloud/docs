@@ -1,619 +1,137 @@
 ---
-title: GitHub Actions Integration
+title: GitHub Actions
 slug: github-actions
 order: 2
-tags: [integrations, github, ci-cd, github-actions]
+description: Pull DotEnv secrets in GitHub Actions with the official dotenvcloud/action-github action — all inputs, a full workflow, and secret setup.
+tags: [integrations, github-actions, ci-cd, action, secrets, api-key]
 ---
 
-# GitHub Actions Integration
+# GitHub Actions
 
-Integrate DotEnv with GitHub Actions to securely manage secrets in your CI/CD workflows. This guide covers setup, usage patterns, and best practices.
+The official [`dotenvcloud/action-github`](https://github.com/dotenvcloud/action-github) action is
+the supported way to use DotEnv on GitHub Actions. It installs the CLI, authenticates with a
+secret, pulls your secrets, and writes a `.env` file — or exposes them as job environment
+variables — in a few lines of YAML.
 
-## Overview
+## Set up the secret first
 
-The DotEnv GitHub Actions integration allows you to:
+The action needs a **read-only** organization API key, stored as a GitHub Actions secret. CI only
+ever reads secrets, so the key it uses should not be able to modify or delete anything.
 
-- Pull secrets from DotEnv into your workflows
-- Sync secrets between environments
-- Validate secret configurations
-- Automate secret rotation
-- Audit secret usage in CI/CD
+1. Create a read-only API key with [`dotenv apikeys create`](/documentation/cli/commands).
+2. In your repository, go to **Settings → Secrets and variables → Actions → New repository
+   secret**.
+3. Name it `DOTENV_API_KEY` and paste the key.
 
-## Installation
+Reference it in the workflow as `${{ secrets.DOTENV_API_KEY }}`. **Never** inline the key in the
+workflow file.
 
-### 1. GitHub Action
-
-Use the official DotEnv GitHub Action:
+## Minimal usage
 
 ```yaml
-- name: Load DotEnv secrets
-  uses: dotenv/actions/load@v1
+- name: Pull secrets
+  uses: dotenvcloud/action-github@v1
   with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-      project: my-project
-      environment: production
+    api-key: ${{ secrets.DOTENV_API_KEY }}
+    project: myapp
+    target: production
+    environment: api
 ```
 
-### 2. CLI Method
+This writes the merged secrets to `.env` in the workspace. Later steps load that file however they
+normally would.
 
-Install and use the DotEnv CLI directly:
-
-```yaml
-- name: Install DotEnv CLI
-  run: |
-      curl -fsSL https://cli.dotenv.cloud/install.sh | sh
-      echo "$HOME/.dotenv/bin" >> $GITHUB_PATH
-
-- name: Load secrets
-  env:
-      DOTENV_API_KEY: ${{ secrets.DOTENV_API_KEY }}
-  run: |
-      dotenv auth login --api-key $DOTENV_API_KEY
-      dotenv pull production
-      source .env
-```
-
-## Configuration
-
-### Store API Key
-
-1. Go to your GitHub repository settings
-2. Navigate to Secrets and variables → Actions
-3. Add a new repository secret named `DOTENV_API_KEY`
-4. Paste your DotEnv API key
-
-### Basic Workflow
+## Full workflow example
 
 ```yaml
-name: Deploy Application
+name: Deploy
+
 on:
-    push:
-        branches: [main]
+  push:
+    branches: [main]
 
 jobs:
-    deploy:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v3
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Load DotEnv secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app
-                  environment: production
+      - name: Pull DotEnv secrets
+        uses: dotenvcloud/action-github@v1
+        with:
+          api-key: ${{ secrets.DOTENV_API_KEY }}
+          project: myapp
+          target: production
+          environment: api
+          output-file: .env
+          export-variables: true
 
-            - name: Build application
-              run: |
-                  npm install
-                  npm run build
-              env:
-                  API_URL: ${{ env.API_URL }}
-                  DATABASE_URL: ${{ env.DATABASE_URL }}
-
-            - name: Deploy
-              run: npm run deploy
+      # With export-variables: true, secrets are available as env vars here
+      - name: Run deploy
+        run: ./scripts/deploy.sh
 ```
 
-## Usage Patterns
-
-### 1. Environment-Based Deployment
-
-Deploy to different environments based on branch:
+Setting `export-variables: true` exposes each pulled secret as an environment variable for the
+remaining steps in the job, in addition to writing the file. If you only want the file, omit it
+and load `.env` yourself:
 
 ```yaml
-name: Deploy by Environment
-on:
-    push:
-        branches: [main, staging, develop]
-
-jobs:
-    deploy:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v3
-
-            - name: Determine environment
-              id: env
-              run: |
-                  if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-                    echo "environment=production" >> $GITHUB_OUTPUT
-                  elif [[ "${{ github.ref }}" == "refs/heads/staging" ]]; then
-                    echo "environment=staging" >> $GITHUB_OUTPUT
-                  else
-                    echo "environment=development" >> $GITHUB_OUTPUT
-                  fi
-
-            - name: Load DotEnv secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app
-                  environment: ${{ steps.env.outputs.environment }}
-
-            - name: Deploy to ${{ steps.env.outputs.environment }}
-              run: |
-                  echo "Deploying to ${{ steps.env.outputs.environment }}"
-                  npm run deploy:${{ steps.env.outputs.environment }}
+      - name: Load .env
+        run: |
+          set -a; . ./.env; set +a
+          ./scripts/deploy.sh
 ```
 
-### 2. Pull Request Validation
+## Inputs
 
-Validate secrets before merging:
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `api-key` | Yes | — | Read-only organization API key. Use `${{ secrets.DOTENV_API_KEY }}`. |
+| `project` | Yes | — | Project name. |
+| `target` | No | — | Target (deployment stage) within the project. |
+| `environment` | No | — | Environment within the target. |
+| `output-file` | No | `.env` | Path to write the secrets file. |
+| `format` | No | `env` | Output format: `env`, `json`, `yaml`, `shell`, `dockerfile`. |
+| `export-variables` | No | `false` | Also expose pulled secrets as job environment variables. |
+| `organization` | No | — | Organization slug, if the key isn't already scoped to one. |
+| `api-url` | No | — | Override the API base URL (for self-hosted or staging APIs). |
+| `decrypt` | No | `true` | Decrypt values. Set `false` to fetch raw encrypted blobs. |
+| `resolve` | No | `false` | Expand `${VAR}` references between secrets before output. |
+| `quiet` | No | `false` | Suppress non-error output. |
+| `merge` | No | `true` | Merge the full path (project → target → environment). |
+| `cli-version` | No | latest | Pin a specific CLI version to install. |
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `env-file` | Path to the file the action wrote. |
+
+Use it in later steps:
 
 ```yaml
-name: PR Validation
-on:
-    pull_request:
-        types: [opened, synchronize]
-
-jobs:
-    validate:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v3
-
-            - name: Validate DotEnv configuration
-              uses: dotenv/actions/validate@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app
-                  environment: staging
-
-            - name: Test with secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app
-                  environment: staging
-
-            - name: Run tests
-              run: |
-                  npm install
-                  npm test
-              env:
-                  NODE_ENV: test
+      - name: Show where secrets landed
+        run: echo "Wrote ${{ steps.dotenv.outputs.env-file }}"
 ```
 
-### 3. Multi-Project Workflow
+(Give the DotEnv step an `id:` to reference its outputs.)
 
-Handle multiple projects in a monorepo:
+## Keep .env out of the repo
 
-```yaml
-name: Deploy Monorepo
-on:
-    push:
-        branches: [main]
+The pulled file holds real values. Make sure `.env` is gitignored so a build checkout can never
+commit it back:
 
-jobs:
-    deploy-api:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v3
-
-            - name: Load API secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app-api
-                  environment: production
-                  prefix: API_
-
-            - name: Deploy API
-              run: |
-                  cd packages/api
-                  npm run deploy
-
-    deploy-web:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v3
-
-            - name: Load Web secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app-web
-                  environment: production
-                  prefix: WEB_
-
-            - name: Deploy Web
-              run: |
-                  cd packages/web
-                  npm run deploy
+```gitignore
+.env
+.env.*
+!.env.example
 ```
 
-### 4. Secret Rotation Workflow
-
-Automate secret rotation:
-
-```yaml
-name: Rotate Secrets
-on:
-    schedule:
-        - cron: "0 0 1 * *" # Monthly
-    workflow_dispatch:
-
-jobs:
-    rotate:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Rotate API keys
-              uses: dotenv/actions/rotate@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app
-                  environment: production
-                  secrets:
-                      - STRIPE_API_KEY
-                      - SENDGRID_API_KEY
-                      - EXTERNAL_API_KEY
-
-            - name: Notify team
-              uses: actions/github-script@v6
-              with:
-                  script: |
-                      github.rest.issues.create({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        title: 'Secrets Rotated',
-                        body: 'Monthly secret rotation completed successfully.'
-                      })
-```
-
-## Advanced Features
-
-### 1. Conditional Secret Loading
-
-Load secrets based on conditions:
-
-```yaml
-- name: Load secrets conditionally
-  uses: dotenv/actions/load@v1
-  with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-      project: my-app
-      environment: ${{ github.event_name == 'release' && 'production' || 'staging' }}
-      only-if-exists: true
-```
-
-### 2. Export Formats
-
-Export secrets in different formats:
-
-```yaml
-- name: Export as JSON
-  uses: dotenv/actions/export@v1
-  with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-      project: my-app
-      environment: production
-      format: json
-      output-file: secrets.json
-
-- name: Export for Docker
-  uses: dotenv/actions/export@v1
-  with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-      project: my-app
-      environment: production
-      format: docker
-      output-file: .env.docker
-```
-
-### 3. Matrix Builds
-
-Test across multiple environments:
-
-```yaml
-name: Matrix Testing
-on: [push]
-
-jobs:
-    test:
-        runs-on: ubuntu-latest
-        strategy:
-            matrix:
-                environment: [development, staging, production]
-                node: [16, 18, 20]
-        steps:
-            - uses: actions/checkout@v3
-
-            - name: Use Node.js ${{ matrix.node }}
-              uses: actions/setup-node@v3
-              with:
-                  node-version: ${{ matrix.node }}
-
-            - name: Load secrets for ${{ matrix.environment }}
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app
-                  environment: ${{ matrix.environment }}
-
-            - name: Run tests
-              run: |
-                  npm install
-                  npm test
-```
-
-### 4. Masked Output
-
-Automatically mask sensitive values:
-
-```yaml
-- name: Load and mask secrets
-  uses: dotenv/actions/load@v1
-  with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-      project: my-app
-      environment: production
-      mask-values: true
-
-- name: Debug (secrets are masked)
-  run: |
-      echo "API URL: $API_URL"
-      echo "Database: $DATABASE_URL"
-```
-
-## Security Best Practices
-
-### 1. Minimal Permissions
-
-Create API keys with minimal required permissions:
-
-```yaml
-# .github/dotenv-permissions.yml
-permissions:
-    - resource: secrets
-      actions: [read]
-      environments: [production, staging]
-    - resource: projects
-      actions: [read]
-```
-
-### 2. Environment Protection
-
-Use GitHub environment protection rules:
-
-```yaml
-jobs:
-    deploy:
-        runs-on: ubuntu-latest
-        environment:
-            name: production
-            url: https://app.example.com
-        steps:
-            - name: Load production secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY_PROD }}
-                  project: my-app
-                  environment: production
-```
-
-### 3. Audit Logging
-
-Enable audit logging for compliance:
-
-```yaml
-- name: Load secrets with audit
-  uses: dotenv/actions/load@v1
-  with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-      project: my-app
-      environment: production
-      audit-log: true
-      audit-metadata:
-          workflow: ${{ github.workflow }}
-          run-id: ${{ github.run_id }}
-          actor: ${{ github.actor }}
-```
-
-### 4. Secret Scanning
-
-Prevent accidental secret exposure:
-
-```yaml
-- name: Scan for secrets
-  uses: dotenv/actions/scan@v1
-  with:
-      scan-pull-request: true
-      fail-on-secrets: true
-      exclude-patterns:
-          - "*.test.js"
-          - "docs/**"
-```
-
-## Troubleshooting
-
-### Common Issues
-
-#### Authentication Failed
-
-```yaml
-- name: Debug authentication
-  env:
-      DOTENV_DEBUG: true
-  run: |
-      dotenv auth status
-      dotenv project list
-```
-
-#### Environment Not Found
-
-```yaml
-- name: List available environments
-  run: |
-      dotenv env list --project my-app
-```
-
-#### Network Issues
-
-```yaml
-- name: Test connectivity
-  run: |
-      curl -I https://api.dotenv.cloud/v1/health
-      dotenv status
-```
-
-### Debug Mode
-
-Enable detailed logging:
-
-```yaml
-- name: Load secrets (debug mode)
-  uses: dotenv/actions/load@v1
-  with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-      project: my-app
-      environment: production
-      debug: true
-```
-
-## Examples
-
-### Complete CI/CD Pipeline
-
-```yaml
-name: Complete CI/CD
-on:
-    push:
-        branches: [main]
-    pull_request:
-        branches: [main]
-
-env:
-    NODE_VERSION: 18
-
-jobs:
-    test:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v3
-
-            - name: Setup Node.js
-              uses: actions/setup-node@v3
-              with:
-                  node-version: ${{ env.NODE_VERSION }}
-                  cache: npm
-
-            - name: Load test secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app
-                  environment: test
-
-            - name: Install dependencies
-              run: npm ci
-
-            - name: Run tests
-              run: npm test
-
-            - name: Upload coverage
-              uses: codecov/codecov-action@v3
-
-    build:
-        needs: test
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v3
-
-            - name: Load build secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY }}
-                  project: my-app
-                  environment: staging
-
-            - name: Build application
-              run: |
-                  npm ci
-                  npm run build
-
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v3
-              with:
-                  name: build-artifacts
-                  path: dist/
-
-    deploy:
-        needs: build
-        runs-on: ubuntu-latest
-        if: github.ref == 'refs/heads/main'
-        environment:
-            name: production
-            url: https://app.example.com
-        steps:
-            - uses: actions/checkout@v3
-
-            - name: Download artifacts
-              uses: actions/download-artifact@v3
-              with:
-                  name: build-artifacts
-                  path: dist/
-
-            - name: Load production secrets
-              uses: dotenv/actions/load@v1
-              with:
-                  api-key: ${{ secrets.DOTENV_API_KEY_PROD }}
-                  project: my-app
-                  environment: production
-
-            - name: Deploy to production
-              run: |
-                  npm run deploy:prod
-
-            - name: Notify deployment
-              uses: actions/github-script@v6
-              with:
-                  script: |
-                      github.rest.repos.createDeploymentStatus({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        deployment_id: context.payload.deployment.id,
-                        state: 'success',
-                        environment_url: 'https://app.example.com'
-                      })
-```
-
-## Migration Guide
-
-### From GitHub Secrets
-
-Migrate from GitHub Secrets to DotEnv:
-
-```yaml
-# Before
-- name: Deploy
-  env:
-      API_KEY: ${{ secrets.API_KEY }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-  run: npm run deploy
-
-# After
-- name: Load DotEnv secrets
-  uses: dotenv/actions/load@v1
-  with:
-      api-key: ${{ secrets.DOTENV_API_KEY }}
-      project: my-app
-      environment: production
-
-- name: Deploy
-  run: npm run deploy
-```
-
-## Resources
-
-- [DotEnv CLI Documentation](/documentation/v1/cli/overview)
-- [API Reference](/documentation/v1/api/overview)
-- [GitHub Actions Documentation](https://docs.github.com/actions)
-- [Security Best Practices](/documentation/v1/security/best-practices)
-
-## Next Steps
-
-- [Set up your first workflow](#basic-workflow)
-- [Configure environment protection](#environment-protection)
-- [Implement secret rotation](#secret-rotation-workflow)
-- [Enable audit logging](#audit-logging)
+## Where to go next
+
+- [CI/CD and containers](/documentation/integrations/ci-cd-and-containers) — the same idea on
+  GitLab, Jenkins, CircleCI, and Docker.
+- [Integrations overview](/documentation/integrations/overview) — when to use the Action vs the
+  CLI.
+- [CI/CD pipelines](/documentation/use-cases/ci-cd) — the general pattern and read-only keys.
+- [Authentication](/documentation/cli/authentication) — creating and scoping API keys.

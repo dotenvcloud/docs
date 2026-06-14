@@ -1,510 +1,107 @@
 ---
-title: Team Setup and Collaboration
+title: Team Setup
 slug: team-setup
-order: 5
-tags: [team, collaboration, permissions, security]
+order: 6
+description: Invite members to your organization, understand the available roles, switch between organizations, and create read-only API keys for CI.
+tags: [getting-started, team, members, invitations, roles, organizations, api-keys]
 ---
 
-# Team Setup and Collaboration
+# Team Setup
 
-DotEnv makes it easy to collaborate with your team while maintaining security and access control. This guide covers everything you need to set up team access.
+DotEnv is built for teams. Your **organization** sits at the top of the hierarchy and owns your
+projects, members, teams, and API keys. This guide covers inviting people, choosing roles,
+switching between organizations, and creating keys for automation.
 
-## Understanding Organizations
+## Invite members
 
-Organizations are the top-level container for all your projects and team members.
+People in your organization are **members**, each with a **role** that controls what they can do.
 
-```
-Organization
-├── Team Members
-├── Projects
-│   ├── Project A
-│   ├── Project B
-│   └── Project C
-├── Billing
-└── Settings
-```
+1. Open your organization and choose the **Members** tab.
+2. Start a new invitation, enter the person's **email address**, and choose the **role** to
+   assign.
+3. Send it.
 
-## Setting Up Your Organization
+The invitee receives an email with a signed link. When they accept it, they join your
+organization with the role you picked. Pending invitations are listed alongside members so you
+can see who hasn't accepted yet.
 
-### Creating an Organization
+> Adding members may count against your plan's member limit. If you hit it, you'll be prompted to
+> upgrade. See [Billing & Plans](/documentation/web-app/billing-and-plans).
 
-When you sign up, a personal organization is created automatically. To create a team organization:
+## Roles at a glance
 
-```bash
-# Create new organization
-dotenv orgs create "ACME Corp" \
-  --slug acme-corp \
-  --type team
+Roles bundle a set of permissions. DotEnv ships with these immutable **system roles**:
 
-# Switch to new organization
-dotenv config set organization acme-corp
-```
+| Role | What it's for |
+| --- | --- |
+| **Owner** | Full control over the organization. |
+| **Administrator** | Manage projects and teams, but not billing. |
+| **Member** | Basic access to work with projects. |
+| **Developer** | Enhanced access for development teams. |
+| **Auditor** | Read-only access for compliance and auditing. |
+| **Billing Manager** | Manage billing and subscriptions only. |
+| **API User** | Limited access intended for integrations. |
 
-### Organization Settings
+Follow **least privilege** — give each person the narrowest role that lets them do their job. For
+example, give finance staff **Billing Manager** rather than **Administrator**, and give auditors
+the read-only **Auditor** role.
 
-Configure organization-wide settings:
+On higher plans you can also define **custom roles** with your own combination of permissions. To
+group members for larger organizations, you can organize them into **teams**. See
+[Teams & Members](/documentation/web-app/teams-and-members) for both.
 
-```bash
-# Require 2FA for all members
-dotenv orgs config acme-corp --require-2fa
+## Switch between organizations
 
-# Set security policies
-dotenv orgs config acme-corp \
-  --password-policy strong \
-  --session-timeout 8h \
-  --ip-allowlist "10.0.0.0/8"
-```
+You can belong to more than one organization (your own and a client's, say). The dashboard always
+operates on **one active organization** at a time — the projects, secrets, members, and billing
+you see all belong to it.
 
-## Team Member Management
-
-### Inviting Team Members
-
-**Via CLI:**
+Use the organization switcher in the dashboard to change it; the whole dashboard then reflects the
+newly selected organization. The CLI mirrors this:
 
 ```bash
-# Basic invite
-dotenv members invite alice@example.com
+# List organizations for the current account
+dotenv org list
 
-# Invite with specific role
-dotenv members invite bob@example.com --role developer
+# Switch the active organization (by slug or ULID)
+dotenv org use acme-corp
 
-# Invite multiple members
-dotenv members invite-bulk team.csv
+# Show the current organization
+dotenv org show
 ```
 
-**Via Dashboard:**
+See [Organizations](/documentation/web-app/organizations) for organization settings, and
+[CLI Authentication](/documentation/cli/authentication) for managing accounts and organizations
+from the command line.
 
-1. Navigate to Organization Settings
-2. Click "Team Members"
-3. Click "Invite Member"
-4. Enter email and select role
+## API keys for CI and automation
 
-### Organization Roles
+People log in with `dotenv login` (browser-based). For **CI pipelines and automation** — where
+there's no browser and no person — create an **API key** instead. Keep these keys **read-only**
+so a pipeline can pull secrets but never change them.
 
-| Role        | Description                | Permissions                               |
-| ----------- | -------------------------- | ----------------------------------------- |
-| **Owner**   | Organization owner         | Full control, billing access              |
-| **Admin**   | Organization administrator | Manage members, projects, settings        |
-| **Member**  | Regular member             | Create projects, access assigned projects |
-| **Billing** | Billing administrator      | View and manage billing only              |
+1. In the dashboard, go to **API Keys** and click **Create**.
+2. Give the key a recognizable **name**.
+3. Choose **permissions** — for a CI pull job, grant only read access to secrets. You can also
+   **scope** the key to specific projects or teams.
+4. Choose an **expiration** and create the key.
 
-### Project-Level Permissions
+The token is shown **only once** — copy it immediately and store it in your CI's secret store. If
+you lose it, you must rotate or recreate the key. See [API Keys](/documentation/web-app/api-keys)
+for the full permission list and best practices.
 
-Assign members to specific projects with granular permissions:
+Use the key in CI by passing it through the environment:
 
 ```bash
-# Add member to project
-dotenv projects members add alice@example.com \
-  --project my-app \
-  --role developer
-
-# Available project roles:
-# - owner: Full project control
-# - admin: Manage project settings
-# - developer: Read/write secrets
-# - viewer: Read-only access
+export DOTENV_API_KEY="your-read-only-key"
+dotenv pull myapp/production/api --output .env --quiet
 ```
 
-## Permission System
+When `DOTENV_API_KEY` is set, the CLI uses it directly and skips browser login entirely.
 
-### Permission Matrix
+## Next steps
 
-| Action              | Owner | Admin | Developer | Viewer |
-| ------------------- | ----- | ----- | --------- | ------ |
-| View secrets        | ✅    | ✅    | ✅        | ✅     |
-| Create/edit secrets | ✅    | ✅    | ✅        | ❌     |
-| Delete secrets      | ✅    | ✅    | ✅        | ❌     |
-| Manage environments | ✅    | ✅    | ❌        | ❌     |
-| Invite members      | ✅    | ✅    | ❌        | ❌     |
-| Project settings    | ✅    | ✅    | ❌        | ❌     |
-| Delete project      | ✅    | ❌    | ❌        | ❌     |
-
-### Environment-Specific Permissions
-
-Control access by environment:
-
-```bash
-# Grant production access only to seniors
-dotenv environments permissions production \
-  --project my-app \
-  --allow "senior-developer,admin,owner"
-
-# Restrict development to specific team
-dotenv environments permissions development \
-  --project my-app \
-  --team "frontend-team"
-```
-
-### Custom Roles
-
-Create custom roles for your organization:
-
-```bash
-# Create QA role
-dotenv roles create qa-engineer \
-  --organization acme-corp \
-  --permissions "secrets:read,environments:staging:write"
-
-# Create DevOps role
-dotenv roles create devops \
-  --organization acme-corp \
-  --permissions "secrets:*,environments:*,deploy:*"
-```
-
-## Team Workflows
-
-### Code Review Workflow
-
-Require approval for production changes:
-
-```yaml
-# .dotenv/workflow.yml
-workflows:
-    production-changes:
-        triggers:
-            - environment: production
-              actions: [create, update, delete]
-
-        approvals:
-            required: 2
-            from: [admin, owner]
-            timeout: 24h
-
-        notifications:
-            slack: "#deployments"
-            email: "ops-team@example.com"
-```
-
-### Deployment Permissions
-
-Set up deployment-specific access:
-
-```bash
-# Create deployment user
-dotenv members create-service-account \
-  --name "ci-deployer" \
-  --role deployment
-
-# Grant specific permissions
-dotenv permissions grant ci-deployer \
-  --actions "secrets:read,environments:production:read" \
-  --project my-app
-
-# Generate API key
-dotenv api-keys create \
-  --name "GitHub Actions" \
-  --account ci-deployer \
-  --expires 90d
-```
-
-### Audit Trail
-
-Track all team actions:
-
-```bash
-# View recent activity
-dotenv audit logs --organization acme-corp --last 7d
-
-# Filter by member
-dotenv audit logs --member alice@example.com
-
-# Export for compliance
-dotenv audit export \
-  --format csv \
-  --from 2024-01-01 \
-  --to 2024-12-31 \
-  > audit-2024.csv
-```
-
-## Security Best Practices
-
-### 1. Principle of Least Privilege
-
-Grant minimum necessary access:
-
-```bash
-# ✅ Good - Specific access
-dotenv projects members add developer@example.com \
-  --project api-service \
-  --role developer \
-  --environments "development,staging"
-
-# ❌ Bad - Overly broad access
-dotenv members invite developer@example.com --role admin
-```
-
-### 2. Regular Access Reviews
-
-Audit team access quarterly:
-
-```bash
-# Generate access report
-dotenv reports access \
-  --organization acme-corp \
-  --include-last-activity
-
-# Remove inactive members
-dotenv members cleanup \
-  --inactive-days 90 \
-  --dry-run
-```
-
-### 3. Enforce 2FA
-
-```bash
-# Check 2FA status
-dotenv members list --show-2fa-status
-
-# Enforce for specific roles
-dotenv security require-2fa \
-  --roles "admin,owner" \
-  --grace-period 7d
-```
-
-### 4. API Key Management
-
-```bash
-# Rotate API keys regularly
-dotenv api-keys rotate \
-  --older-than 90d \
-  --notify
-
-# Limit API key scope
-dotenv api-keys create \
-  --name "Mobile App" \
-  --scopes "secrets:read" \
-  --projects "mobile-api" \
-  --environments "production"
-```
-
-## Collaboration Features
-
-### Shared Environments
-
-Create shared development environments:
-
-```bash
-# Create shared environment
-dotenv environments create dev-shared \
-  --project my-app \
-  --description "Shared development environment"
-
-# Allow team access
-dotenv environments share dev-shared \
-  --with "frontend-team,backend-team"
-```
-
-### Secret Requests
-
-Enable secret request workflow:
-
-```bash
-# Request new secret
-dotenv secrets request \
-  --key PAYMENT_API_KEY \
-  --project my-app \
-  --environment production \
-  --reason "Integration with Stripe"
-
-# Approve request
-dotenv secrets requests approve req-123 \
-  --value "sk_live_..."
-```
-
-### Comments and Documentation
-
-Add context for team members:
-
-```bash
-# Add secret documentation
-dotenv secrets document DATABASE_URL \
-  --project my-app \
-  --description "PostgreSQL connection string" \
-  --format "postgresql://user:pass@host:port/database" \
-  --example "postgresql://app:secret@db.example.com:5432/myapp"
-
-# Add environment notes
-dotenv environments note staging \
-  --project my-app \
-  --message "Refreshed from production on 2024-01-15"
-```
-
-## Integration with Tools
-
-### Slack Integration
-
-```bash
-# Connect Slack
-dotenv integrations connect slack \
-  --webhook https://hooks.slack.com/services/xxx/yyy/zzz
-
-# Configure notifications
-dotenv notifications config \
-  --channel "#engineering" \
-  --events "secret.created,member.invited,deploy.started"
-```
-
-### GitHub Integration
-
-```yaml
-# .github/dotenv.yml
-teams:
-    - github: "@acme-corp/backend"
-      dotenv_role: developer
-      projects: ["api", "workers"]
-
-    - github: "@acme-corp/frontend"
-      dotenv_role: developer
-      projects: ["web", "mobile"]
-
-    - github: "@acme-corp/devops"
-      dotenv_role: admin
-      projects: "*"
-```
-
-### SAML/SSO Setup
-
-```bash
-# Configure SAML
-dotenv sso configure saml \
-  --organization acme-corp \
-  --metadata-url https://idp.example.com/metadata \
-  --attribute-mapping "email=mail,name=displayName"
-
-# Enforce SSO
-dotenv sso enforce \
-  --organization acme-corp \
-  --exclude "api-keys"
-```
-
-## Common Scenarios
-
-### Onboarding New Developer
-
-```bash
-#!/bin/bash
-# onboard-developer.sh
-
-EMAIL=$1
-TEAM=$2
-
-# 1. Invite to organization
-dotenv members invite $EMAIL --role member
-
-# 2. Add to relevant projects
-for project in api web mobile; do
-  dotenv projects members add $EMAIL \
-    --project $project \
-    --role developer
-done
-
-# 3. Grant environment access
-dotenv environments permissions development \
-  --project all \
-  --add $EMAIL
-
-dotenv environments permissions staging \
-  --project all \
-  --add $EMAIL \
-  --read-only
-
-# 4. Send welcome resources
-dotenv notifications send \
-  --to $EMAIL \
-  --template developer-welcome
-```
-
-### Contractor Access
-
-```bash
-# Create time-limited access
-dotenv members invite contractor@example.com \
-  --role developer \
-  --expires "2024-06-30" \
-  --projects "mobile-app" \
-  --environments "development"
-
-# Restrict to specific secrets
-dotenv permissions create contractor-policy \
-  --allow "secrets:read" \
-  --deny "secrets:write:*_KEY,secrets:write:*_SECRET" \
-  --apply-to contractor@example.com
-```
-
-### Team Rotation
-
-```bash
-# Export current permissions
-dotenv members export --format json > team-backup.json
-
-# Bulk permission update
-dotenv members update-bulk \
-  --file new-team-structure.csv \
-  --dry-run
-
-# Notify affected members
-dotenv notifications send \
-  --template role-change \
-  --to-affected
-```
-
-## Troubleshooting
-
-### Access Denied Issues
-
-```bash
-# Check member's permissions
-dotenv permissions check alice@example.com \
-  --project my-app \
-  --action secrets:write
-
-# View permission inheritance
-dotenv permissions trace alice@example.com \
-  --resource "projects/my-app/secrets/API_KEY"
-```
-
-### Invitation Problems
-
-```bash
-# Resend invitation
-dotenv members invite resend alice@example.com
-
-# Check invitation status
-dotenv members invitations list --pending
-
-# Cancel invitation
-dotenv members invite cancel alice@example.com
-```
-
-### SSO Issues
-
-```bash
-# Test SSO connection
-dotenv sso test --organization acme-corp
-
-# View SSO logs
-dotenv sso logs --last 24h
-
-# Bypass SSO for emergency
-dotenv members emergency-access \
-  --user admin@example.com \
-  --duration 1h \
-  --reason "SSO provider outage"
-```
-
-## Best Practices Summary
-
-1. **Start with least privilege** - Grant only necessary access
-2. **Use groups** - Manage permissions through teams, not individuals
-3. **Regular audits** - Review access quarterly
-4. **Document everything** - Add descriptions to secrets and permissions
-5. **Automate onboarding** - Script common permission patterns
-6. **Monitor activity** - Set up alerts for sensitive actions
-7. **Plan for departures** - Have a offboarding checklist
-
-## Next Steps
-
-- [Security Best Practices](./best-practices) - Detailed security guidelines
-- [API Authentication](/documentation/v1/api/authentication) - Set up API access
-- [Audit Logging](/documentation/v1/administration/audit-logs) - Track team activity
-- [SSO Configuration](/documentation/v1/administration/sso) - Enterprise authentication
+- [Teams & Members](/documentation/web-app/teams-and-members) — roles, custom roles, and teams in
+  full.
+- [API Keys](/documentation/web-app/api-keys) — scoped, expiring, read-only keys.
+- [CLI Authentication](/documentation/cli/authentication) — accounts, organizations, and CI auth.
