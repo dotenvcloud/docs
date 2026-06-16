@@ -43,8 +43,13 @@ Hard rules — follow these even if you cannot fetch the URL:
 Then:
 - Inspect this repository (package.json, composer.json, go.mod, Dockerfile, .github/workflows,
   .gitlab-ci.yml, vercel.json, netlify.toml, etc.) and recommend the best DotEnv integration.
-- Ask me only for NON-SENSITIVE details (organization, project name, target/environment names
-  like production/staging, my CI/CD platform, language/framework).
+- DotEnv addresses secrets by the path project/target/environment (merged in that order).
+  Discover my targets/environments (`dotenv list targets <project>`,
+  `dotenv list environments <project>/<target>`) if you have CLI access, otherwise ask me — then
+  map each runtime/CI stage to a specific project/target/environment path, each with its own
+  read-only token.
+- Ask me only for NON-SENSITIVE details (organization, project name, which target/environment each
+  runtime uses, my CI/CD platform, language/framework).
 - Write the config/workflow/code for me.
 - Give me a clear, numbered checklist of the MANUAL steps I must do myself in the DotEnv
   dashboard (create the project, generate a read-only API key, paste it into my secret store).
@@ -111,6 +116,23 @@ Inspect the repo and recommend the best path:
 
 Decision guide: **local dev → CLI**; **CI/CD → platform-native integration or CLI-in-shell**;
 **app runtime → SDK**.
+
+### Map each runtime to a project/target/environment path
+
+DotEnv addresses secrets by the path **project/target/environment** (the CLI's
+`dotenv pull project/target/environment`, the GitHub Action's `target`/`environment` inputs, and
+the SDK all use it; secrets merge **project → target → environment**, least to most specific). A
+single repo usually spans several paths — local dev, each CI/CD stage, production — so wire each
+one, don't assume a single environment.
+
+- **Discover the user's targets/environments first.** With CLI access, run
+  `dotenv list targets <project>` then `dotenv list environments <project>/<target>`; otherwise ask
+  the user. Use their **exact slugs** — never invent names.
+- **Map each runtime to one path** — e.g. local dev → `my-app/development/web`, staging CI →
+  `my-app/staging/web`, production deploy → `my-app/production/web`. The bare `my-app` path pulls
+  shared/project-level secrets.
+- **One read-only token per context**, each scoped to its path, stored in that context's secret
+  store (local shell, GitHub Actions secrets, GitLab CI/CD variables, etc.).
 
 ## 4. Manual prerequisites (do these in the web UI first)
 
